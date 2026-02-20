@@ -2,42 +2,46 @@ const veloDb = require('@wix-velo/velo-external-db');
 const veloCore = require('@wix-velo/velo-external-db-core');
 const Postgres = require('@wix-velo/external-db-postgres');
 
-console.log("--- Wix-Postgres Adapter 最終起動プロセス ---");
+console.log("--- Wix-Postgres Adapter 最終起動プロセス(Core探索版) ---");
 
 try {
-    // 1. パーツの抽出（最新版の構造を徹底的に探す）
-    // サーバー機能を探す
-    const ExternalDbServer = veloDb.ExternalDbServer || 
-                             veloCore.ExternalDbServer || 
-                             (veloDb.default && veloDb.default.ExternalDbServer);
+    // 1. 部品の抽出：Core（心臓部）から直接探す
+    const ExternalDbServer = veloCore.ExternalDbServer || 
+                             (veloCore.default && veloCore.default.ExternalDbServer) ||
+                             veloDb.ExternalDbServer;
     
-    // Postgres接続機能を探す（先ほどのログで存在を確認済み）
     const PostgresConnector = Postgres.PostgresConnector || 
                               (Postgres.default && Postgres.default.PostgresConnector);
 
-    if (!ExternalDbServer) throw new Error("Server部品が見つかりません");
-    if (!PostgresConnector) throw new Error("Connector部品が見つかりません");
+    // デバッグ：何が見つかったか表示
+    console.log("探索結果 - Server:", typeof ExternalDbServer);
+    console.log("探索結果 - Connector:", typeof PostgresConnector);
 
+    if (typeof ExternalDbServer !== 'function') {
+        // もしこれでもダメなら、Coreの中身を全部ログに出して最後の調査をする
+        console.log("Core内の全部品:", Object.keys(veloCore));
+        throw new Error("Server部品がどうしても見つかりません");
+    }
+
+    // 2. 接続設定
     console.log("データベース接続を準備中...");
     const connector = new PostgresConnector({
         connectionUri: process.env.URL
     });
 
+    // 3. サーバー起動
     console.log("サーバーを初期化中...");
-    // 2026年版の最新仕様に合わせた初期化
     const server = new ExternalDbServer(connector, { 
         secretKey: process.env.SECRET_KEY || "1234" 
     });
 
     server.start().then(() => {
-        console.log("🚀 ついに成功しました！");
-        console.log("Wixに貼り付けるURL: " + (process.env.RENDER_EXTERNAL_URL || "RenderのURL"));
+        console.log("🚀 ついに、ついに成功しました！");
+        console.log("Wixに貼り付けるURLはRenderのDashboardにあるURLです。");
     });
 
 } catch (e) {
-    console.error("‼️ 起動エラーが発生しました:");
+    console.error("‼️ エラー発生:");
     console.error(e.message);
-    // 構造を詳しく表示（デバッグ用）
-    console.log("VeloDb内の部品:", Object.keys(veloDb));
     process.exit(1);
 }
