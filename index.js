@@ -1,36 +1,37 @@
-const { ExternalDbServer } = require('@wix-velo/velo-external-db');
+const veloDb = require('@wix-velo/velo-external-db');
+const veloCore = require('@wix-velo/velo-external-db-core');
 const Postgres = require('@wix-velo/external-db-postgres');
 
-console.log("--- Wix-Postgres Adapter 最終起動テスト ---");
-
-// ライブラリの中身を徹底調査して、使えるものを探す
-function findConfigReader(mod) {
-    if (typeof mod.PostgresConfigReader === 'function') return mod.PostgresConfigReader;
-    if (typeof mod.ConfigReader === 'function') return mod.ConfigReader;
-    if (mod.default && typeof mod.default.PostgresConfigReader === 'function') return mod.default.PostgresConfigReader;
-    if (mod.default && typeof mod.default.ConfigReader === 'function') return mod.default.ConfigReader;
-    return mod; // 最後に自分自身を試す
-}
+console.log("--- 2026年版 Wix-Postgres 最終接続プロセス ---");
 
 try {
-    const SelectedReader = findConfigReader(Postgres);
-    console.log("選択された機能のタイプ:", typeof SelectedReader);
+    // 1. パーツの抽出（最新の構造に対応）
+    const ExternalDbServer = veloDb.ExternalDbServer || veloCore.ExternalDbServer;
+    const PostgresConnector = Postgres.PostgresConnector;
 
-    // new が使えない場合（ただの関数の場合）も考慮
-    const configReader = (typeof SelectedReader === 'function' && SelectedReader.prototype) 
-                         ? new SelectedReader() 
-                         : SelectedReader;
+    if (!ExternalDbServer || !PostgresConnector) {
+        throw new Error("必要な部品（ServerまたはConnector）が見つかりません。");
+    }
 
-    console.log("サーバーを起動します...");
-    const server = new ExternalDbServer(configReader);
+    // 2. 接続設定の構築
+    console.log("データベースに接続中...");
+    const connector = new PostgresConnector({
+        connectionUri: process.env.URL // Renderの環境変数からURLを読み込む
+    });
+
+    // 3. サーバーの起動
+    console.log("サーバーを初期化中...");
+    const server = new ExternalDbServer(connector, { 
+        secretKey: process.env.SECRET_KEY || "1234" 
+    });
 
     server.start().then(() => {
-        console.log("🚀 ついに成功しました！Wixからの接続を待っています。");
+        console.log("🚀 ロケット発射成功！Wixと繋がる準備が整いました。");
+        console.log("URL: " + process.env.RENDER_EXTERNAL_URL);
     });
+
 } catch (e) {
-    console.error("‼️ まだエラーが出る場合は以下を教えてください:");
+    console.error("‼️ 致命的なエラー:");
     console.error(e.message);
-    // ライブラリの構造をログに出力して原因を特定する
-    console.log("ライブラリの中身:", Object.keys(Postgres));
     process.exit(1);
 }
