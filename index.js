@@ -6,43 +6,45 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 起動プロセス ---");
+    console.log("--- 2026年 SPI対応アダプター 最終起動プロセス ---");
 
     try {
-        // 1. データベース接続の作成
+        // 1. データベース接続
         console.log("データベースの準備中...");
-        // 以前の new PostgresConnector ではなく factory を使います
         const connector = await postgresFactory({ 
             connectionUri: process.env.URL 
         }, {});
 
-        // 2. 【最重要】初期化を待機する
-        // これがないと "reading 'initialized'" エラーになります
         if (connector.init) {
-            console.log("コネクタの初期化を実行中...");
             await connector.init();
         }
 
-        // 3. Wixのルーターをセットアップ
+        // 2. Wixルーターの構築（ここで設定の仕方を修正しました！）
         console.log("Wixルーターを構築中...");
-        const externalDbRouter = new ExternalDbRouter(connector, { 
-            secretKey: process.env.SECRET_KEY || "1234" 
-        });
+        
+        // 最新版は config.authorization.secretKey という構造を求めます
+        const config = {
+            authorization: {
+                secretKey: process.env.SECRET_KEY || "1234"
+            }
+        };
 
+        const externalDbRouter = new ExternalDbRouter(connector, config);
+
+        // 3. Expressにセット
         app.use(externalDbRouter.router);
 
-        // 4. サーバー開始
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 完了！アダプターがポート${port}で正常に起動しました。`);
+            console.log(`🚀 ついに、ついに成功です！ポート${port}で待機中。`);
+            console.log("RenderのURLをコピーしてWixに貼り付けてください。");
         });
 
     } catch (e) {
-        console.error("‼️ 致命的なエラー:");
+        console.error("‼️ 起動エラーが発生しました:");
         console.error(e.message);
         process.exit(1);
     }
 }
 
-// 実行！
 startServer();
