@@ -2,43 +2,21 @@ const express = require('express');
 const { ExternalDbRouter } = require('@wix-velo/velo-external-db-core');
 const Postgres = require('@wix-velo/external-db-postgres');
 
-// 🚨 【追加】沈黙のフリーズを絶対に許さない安全装置
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('‼️ [フリーズ検知] 未処理の非同期エラー:', reason);
-});
-process.on('uncaughtException', (err) => {
-    console.error('‼️ [フリーズ検知] 致命的なエラー:', err.message, err.stack);
-});
-
 async function startServer() {
     const app = express();
     app.use(express.json());
 
-    // 通信監視カメラ
     app.use((req, res, next) => {
         console.log(`\n📥 [Wixから着信] ${req.method} ${req.path}`);
-        
         const originalJson = res.json;
         res.json = function(body) {
-            console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}, 理由:`, JSON.stringify(body));
+            console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}`);
             return originalJson.call(this, body);
-        };
-        const originalSend = res.send;
-        res.send = function(body) {
-            if (typeof body === 'string') {
-                console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}`);
-            }
-            return originalSend.call(this, body);
-        };
-        const originalEnd = res.end;
-        res.end = function(chunk, encoding) {
-            console.log(`📤 [Wixへ返信 (完了)] ステータス: ${res.statusCode}`);
-            return originalEnd.call(this, chunk, encoding);
         };
         next();
     });
 
-    console.log("--- 2026年 SPI対応アダプター 最終形態（スプレッド展開版） ---");
+    console.log("--- 2026年 SPI対応アダプター 究極互換版（V2/V3両対応） ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -48,10 +26,8 @@ async function startServer() {
         const dbConfig = {
             host: dbUrl.hostname,
             user: dbUrl.username,
-            username: dbUrl.username,
             password: dbUrl.password,
             db: dbUrl.pathname.slice(1),
-            database: dbUrl.pathname.slice(1),
             port: Number(dbUrl.port) || 5432,
             connectionUri: dbUrlString,
             ssl: { rejectUnauthorized: false }
@@ -67,29 +43,58 @@ async function startServer() {
         }
 
         const config = {
-            authorization: {
-                secretKey: process.env.SECRET_KEY || "1234"
-            }
+            authorization: { secretKey: process.env.SECRET_KEY || "1234" }
         };
 
-        // 🛠️ 【ここが最重要修正！】
-        // ...providers と書くことで、工具箱の中身（dataProvider等）を直接広げて渡します
         const externalDbRouter = new ExternalDbRouter({ 
-            connector: connector,
-            config: config,
-            ...providers 
+            connector, config, ...providers 
         });
 
+        // 🌟🌟🌟 【ここが究極の解決策！】 🌟🌟🌟
+        // Wixエディタ（旧規格）からの要求に、直接手動で答える「特別窓口」を作ります
+
+        // 1. 最初の挨拶 (provision)
+        app.post('/provision', (req, res) => {
+            console.log("🛠️ [V2互換窓口] Wixからの挨拶を「成功(200)」として受け入れました！");
+            res.status(200).json({});
+        });
+
+        // 2. テーブル一覧の要求 (schemas/list)
+        app.post('/schemas/list', async (req, res) => {
+            console.log("🛠️ [V2互換窓口] テーブル一覧を要求されました。Postgresから読み取ります...");
+            try {
+                const schemas = await providers.schemaProvider.list();
+                res.status(200).json({ schemas: schemas });
+            } catch (e) {
+                console.error("‼️ テーブル読み取りエラー:", e.message);
+                res.status(500).json({ error: e.message });
+            }
+        });
+
+        // 3. データの中身の要求 (data/find)
+        app.post('/data/find', async (req, res) => {
+            console.log("🛠️ [V2互換窓口] データ検索を要求されました！");
+            try {
+                const { collectionName, filter, sort, skip, limit } = req.body;
+                const data = await providers.dataProvider.find(collectionName, filter || {}, sort || [], skip || 0, limit || 50);
+                if (data && data.items) {
+                    res.status(200).json(data);
+                } else {
+                    res.status(200).json({ items: data || [], totalCount: (data || []).length });
+                }
+            } catch (e) {
+                console.error("‼️ データ検索エラー:", e.message);
+                res.status(500).json({ error: e.message });
+            }
+        });
+        // 🌟🌟🌟 ここまで 🌟🌟🌟
+
+        // 最新のV3ルーターも一応有効にしておく
         app.use(externalDbRouter.router);
-
-        app.use((err, req, res, next) => {
-            console.error("‼️ 内部処理エラー:", err.message);
-            res.status(500).json({ error: err.message });
-        });
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 アダプターがポート${port}で待機中。`);
+            console.log(`🚀 完璧な互換アダプターがポート${port}で待機中！`);
         });
 
     } catch (e) {
