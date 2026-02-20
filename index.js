@@ -6,37 +6,37 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター DB接続テスト ---");
+    console.log("--- 2026年 SPI対応アダプター DB接続テスト(修正版) ---");
 
     try {
-        // 1. RenderのURLをWixが読める形式に分解する
         const dbUrlString = process.env.URL;
         if (!dbUrlString) throw new Error("環境変数 'URL' が設定されていません。");
         
         console.log("1. データベースURLを分解中...");
         const dbUrl = new URL(dbUrlString);
         
-        // Wixが指定する「host」「user」「password」「db」の箱に詰め替える
+        // Wixの仕様変更に備えて、様々な名前の箱（userとusernameなど）を全部用意します
         const dbConfig = {
             host: dbUrl.hostname,
             user: dbUrl.username,
+            username: dbUrl.username,
             password: dbUrl.password,
-            db: dbUrl.pathname.slice(1), // 先頭のスラッシュを削る
-            port: dbUrl.port || 5432,
-            connectionUri: dbUrlString // 念のため元のURLも入れておく
+            db: dbUrl.pathname.slice(1),
+            database: dbUrl.pathname.slice(1),
+            port: Number(dbUrl.port) || 5432,
+            connectionUri: dbUrlString
         };
 
-        // 2. コネクタを作成（分解した情報を渡す）
         console.log(`2. コネクタを作成中 (接続先: ${dbConfig.host})...`);
         const connector = new PostgresConnector(dbConfig);
 
-        // 3. 初期化を実行
         console.log("3. 初期化命令を送信中...");
         if (typeof connector.init === 'function') {
-            await connector.init();
+            // 【ここが最重要の修正点！】
+            // init() の中にも dbConfig を渡して、起動時の「host迷子」を防ぎます
+            await connector.init(dbConfig);
         }
 
-        // 4. 初期化チェックを強制バイパス
         console.log("4. 初期化チェックをバイパス中...");
         Object.defineProperty(connector, 'isInitialized', {
             value: () => true,
@@ -44,7 +44,6 @@ async function startServer() {
             configurable: true
         });
 
-        // 5. Wixルーターを構築
         console.log("5. ルーターを組み立て中...");
         const config = {
             authorization: {
@@ -57,7 +56,6 @@ async function startServer() {
             config: config 
         });
 
-        // 6. Expressに接続
         app.use(externalDbRouter.router);
 
         const port = process.env.PORT || 10000;
