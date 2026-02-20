@@ -2,36 +2,42 @@ const veloDb = require('@wix-velo/velo-external-db');
 const veloCore = require('@wix-velo/velo-external-db-core');
 const Postgres = require('@wix-velo/external-db-postgres');
 
-console.log("--- 2026年版 Wix-Postgres 最終接続プロセス ---");
+console.log("--- Wix-Postgres Adapter 最終起動プロセス ---");
 
 try {
-    // 1. パーツの抽出（最新の構造に対応）
-    const ExternalDbServer = veloDb.ExternalDbServer || veloCore.ExternalDbServer;
-    const PostgresConnector = Postgres.PostgresConnector;
+    // 1. パーツの抽出（最新版の構造を徹底的に探す）
+    // サーバー機能を探す
+    const ExternalDbServer = veloDb.ExternalDbServer || 
+                             veloCore.ExternalDbServer || 
+                             (veloDb.default && veloDb.default.ExternalDbServer);
+    
+    // Postgres接続機能を探す（先ほどのログで存在を確認済み）
+    const PostgresConnector = Postgres.PostgresConnector || 
+                              (Postgres.default && Postgres.default.PostgresConnector);
 
-    if (!ExternalDbServer || !PostgresConnector) {
-        throw new Error("必要な部品（ServerまたはConnector）が見つかりません。");
-    }
+    if (!ExternalDbServer) throw new Error("Server部品が見つかりません");
+    if (!PostgresConnector) throw new Error("Connector部品が見つかりません");
 
-    // 2. 接続設定の構築
-    console.log("データベースに接続中...");
+    console.log("データベース接続を準備中...");
     const connector = new PostgresConnector({
-        connectionUri: process.env.URL // Renderの環境変数からURLを読み込む
+        connectionUri: process.env.URL
     });
 
-    // 3. サーバーの起動
     console.log("サーバーを初期化中...");
+    // 2026年版の最新仕様に合わせた初期化
     const server = new ExternalDbServer(connector, { 
         secretKey: process.env.SECRET_KEY || "1234" 
     });
 
     server.start().then(() => {
-        console.log("🚀 ロケット発射成功！Wixと繋がる準備が整いました。");
-        console.log("URL: " + process.env.RENDER_EXTERNAL_URL);
+        console.log("🚀 ついに成功しました！");
+        console.log("Wixに貼り付けるURL: " + (process.env.RENDER_EXTERNAL_URL || "RenderのURL"));
     });
 
 } catch (e) {
-    console.error("‼️ 致命的なエラー:");
+    console.error("‼️ 起動エラーが発生しました:");
     console.error(e.message);
+    // 構造を詳しく表示（デバッグ用）
+    console.log("VeloDb内の部品:", Object.keys(veloDb));
     process.exit(1);
 }
