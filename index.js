@@ -2,15 +2,22 @@ const express = require('express');
 const { ExternalDbRouter } = require('@wix-velo/velo-external-db-core');
 const Postgres = require('@wix-velo/external-db-postgres');
 
+// 🚨 【追加】沈黙のフリーズを絶対に許さない安全装置
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('‼️ [フリーズ検知] 未処理の非同期エラー:', reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('‼️ [フリーズ検知] 致命的なエラー:', err.message, err.stack);
+});
+
 async function startServer() {
     const app = express();
     app.use(express.json());
 
-    // 🕵️‍♂️ 【超強化版】Wixからの着信と、Wixへの返信をすべて監視する
+    // 通信監視カメラ
     app.use((req, res, next) => {
         console.log(`\n📥 [Wixから着信] ${req.method} ${req.path}`);
         
-        // アダプターがWixに返す内容をフック（盗聴）して表示
         const originalJson = res.json;
         res.json = function(body) {
             console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}, 理由:`, JSON.stringify(body));
@@ -19,14 +26,19 @@ async function startServer() {
         const originalSend = res.send;
         res.send = function(body) {
             if (typeof body === 'string') {
-                console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}, 理由: ${body}`);
+                console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}`);
             }
             return originalSend.call(this, body);
+        };
+        const originalEnd = res.end;
+        res.end = function(chunk, encoding) {
+            console.log(`📤 [Wixへ返信 (完了)] ステータス: ${res.statusCode}`);
+            return originalEnd.call(this, chunk, encoding);
         };
         next();
     });
 
-    console.log("--- 2026年 SPI対応アダプター 最終形態（超監視版） ---");
+    console.log("--- 2026年 SPI対応アダプター 最終形態（スプレッド展開版） ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -60,17 +72,24 @@ async function startServer() {
             }
         };
 
+        // 🛠️ 【ここが最重要修正！】
+        // ...providers と書くことで、工具箱の中身（dataProvider等）を直接広げて渡します
         const externalDbRouter = new ExternalDbRouter({ 
             connector: connector,
-            providers: providers, 
-            config: config 
+            config: config,
+            ...providers 
         });
 
         app.use(externalDbRouter.router);
 
+        app.use((err, req, res, next) => {
+            console.error("‼️ 内部処理エラー:", err.message);
+            res.status(500).json({ error: err.message });
+        });
+
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 アダプターがポート${port}で待機中。Wixとの会話をすべて監視します...`);
+            console.log(`🚀 アダプターがポート${port}で待機中。`);
         });
 
     } catch (e) {
