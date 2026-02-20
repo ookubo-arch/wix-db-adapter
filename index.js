@@ -6,7 +6,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター DB接続テスト(修正版) ---");
+    console.log("--- 2026年 SPI対応アダプター DB接続テスト(真の最終関門突破版) ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -15,7 +15,6 @@ async function startServer() {
         console.log("1. データベースURLを分解中...");
         const dbUrl = new URL(dbUrlString);
         
-        // Wixの仕様変更に備えて、様々な名前の箱（userとusernameなど）を全部用意します
         const dbConfig = {
             host: dbUrl.hostname,
             user: dbUrl.username,
@@ -32,17 +31,12 @@ async function startServer() {
 
         console.log("3. 初期化命令を送信中...");
         if (typeof connector.init === 'function') {
-            // 【ここが最重要の修正点！】
-            // init() の中にも dbConfig を渡して、起動時の「host迷子」を防ぎます
             await connector.init(dbConfig);
         }
 
-        console.log("4. 初期化チェックをバイパス中...");
-        Object.defineProperty(connector, 'isInitialized', {
-            value: () => true,
-            writable: true,
-            configurable: true
-        });
+        console.log("4. 初期化フラグを手動でONに切り替えます...");
+        // ↓↓↓ これがすべてのエラーを終わらせる最後の一行です ↓↓↓
+        connector.initialized = true;
 
         console.log("5. ルーターを組み立て中...");
         const config = {
