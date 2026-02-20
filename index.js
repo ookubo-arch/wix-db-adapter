@@ -6,7 +6,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 最終形態（プロバイダ完全対応版） ---");
+    console.log("--- 2026年 SPI対応アダプター 最終形態（SSL対応版） ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -14,6 +14,8 @@ async function startServer() {
         
         console.log("1. データベースURLを分解中...");
         const dbUrl = new URL(dbUrlString);
+        
+        // 【修正箇所】Renderのデータベースと接続するための SSL 設定を追加しました！
         const dbConfig = {
             host: dbUrl.hostname,
             user: dbUrl.username,
@@ -22,11 +24,11 @@ async function startServer() {
             db: dbUrl.pathname.slice(1),
             database: dbUrl.pathname.slice(1),
             port: Number(dbUrl.port) || 5432,
-            connectionUri: dbUrlString
+            connectionUri: dbUrlString,
+            ssl: { rejectUnauthorized: false } // ← これがSSL必須エラーを消す魔法の1行です
         };
 
         console.log(`2. ファクトリーを使ってデータベース部品を生成中...`);
-        // 【最重要】コネクタだけでなく、データの読み書き担当（providers）も一気に生成します
         const factoryResult = await Postgres.postgresFactory(dbConfig, dbConfig);
         
         const connector = factoryResult.connector || factoryResult;
@@ -45,8 +47,6 @@ async function startServer() {
             }
         };
 
-        // 【ここがエラーの解決策！】
-        // router に connector, config に加えて "providers" も渡します！
         const externalDbRouter = new ExternalDbRouter({ 
             connector: connector,
             providers: providers, 
@@ -57,8 +57,8 @@ async function startServer() {
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 完全勝利！アダプターがポート${port}で正常に起動し、健康診断も突破しました。`);
-            console.log("今度こそ、Wixエディタの「外部データベース接続」にURLを貼り付けてください。");
+            console.log(`🚀 完璧な勝利！アダプターがポート${port}で正常に起動しました。`);
+            console.log("SSL設定も完了！Wixエディタの「外部データベース接続」にURLを貼り付けてください！");
         });
 
     } catch (e) {
