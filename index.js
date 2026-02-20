@@ -6,13 +6,27 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    // 🕵️‍♂️ 【追加】Wixからの通信を監視するログ機能
+    // 🕵️‍♂️ 【超強化版】Wixからの着信と、Wixへの返信をすべて監視する
     app.use((req, res, next) => {
-        console.log(`📥 [Wixから着信] ${req.method} ${req.path}`);
+        console.log(`\n📥 [Wixから着信] ${req.method} ${req.path}`);
+        
+        // アダプターがWixに返す内容をフック（盗聴）して表示
+        const originalJson = res.json;
+        res.json = function(body) {
+            console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}, 理由:`, JSON.stringify(body));
+            return originalJson.call(this, body);
+        };
+        const originalSend = res.send;
+        res.send = function(body) {
+            if (typeof body === 'string') {
+                console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}, 理由: ${body}`);
+            }
+            return originalSend.call(this, body);
+        };
         next();
     });
 
-    console.log("--- 2026年 SPI対応アダプター 最終形態（通信監視版） ---");
+    console.log("--- 2026年 SPI対応アダプター 最終形態（超監視版） ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -54,16 +68,9 @@ async function startServer() {
 
         app.use(externalDbRouter.router);
 
-        // 🚨 【追加】内部の隠れたエラーを逃さず表示する機能
-        app.use((err, req, res, next) => {
-            console.error("‼️ 内部処理エラー:", err.message);
-            console.error(err.stack);
-            res.status(500).json({ error: err.message });
-        });
-
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 アダプターがポート${port}で待機中。Wixからのアクセスを監視しています...`);
+            console.log(`🚀 アダプターがポート${port}で待機中。Wixとの会話をすべて監視します...`);
         });
 
     } catch (e) {
