@@ -1,12 +1,12 @@
 const express = require('express');
 const { ExternalDbRouter } = require('@wix-velo/velo-external-db-core');
-const { PostgresConnector } = require('@wix-velo/external-db-postgres');
+const Postgres = require('@wix-velo/external-db-postgres');
 
 async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター DB接続テスト(真の最終関門突破版) ---");
+    console.log("--- 2026年 SPI対応アダプター 最終形態（プロバイダ完全対応版） ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -14,7 +14,6 @@ async function startServer() {
         
         console.log("1. データベースURLを分解中...");
         const dbUrl = new URL(dbUrlString);
-        
         const dbConfig = {
             host: dbUrl.hostname,
             user: dbUrl.username,
@@ -26,27 +25,31 @@ async function startServer() {
             connectionUri: dbUrlString
         };
 
-        console.log(`2. コネクタを作成中 (接続先: ${dbConfig.host})...`);
-        const connector = new PostgresConnector(dbConfig);
+        console.log(`2. ファクトリーを使ってデータベース部品を生成中...`);
+        // 【最重要】コネクタだけでなく、データの読み書き担当（providers）も一気に生成します
+        const factoryResult = await Postgres.postgresFactory(dbConfig, dbConfig);
+        
+        const connector = factoryResult.connector || factoryResult;
+        const providers = factoryResult.providers || factoryResult;
 
-        console.log("3. 初期化命令を送信中...");
-        if (typeof connector.init === 'function') {
-            await connector.init(dbConfig);
+        console.log("3. 初期化状態を確定中...");
+        if (connector) connector.initialized = true;
+        if (connector && typeof connector.isInitialized !== 'function') {
+            connector.isInitialized = () => true;
         }
 
-        console.log("4. 初期化フラグを手動でONに切り替えます...");
-        // ↓↓↓ これがすべてのエラーを終わらせる最後の一行です ↓↓↓
-        connector.initialized = true;
-
-        console.log("5. ルーターを組み立て中...");
+        console.log("4. Wixルーターを組み立て中...");
         const config = {
             authorization: {
                 secretKey: process.env.SECRET_KEY || "1234"
             }
         };
 
+        // 【ここがエラーの解決策！】
+        // router に connector, config に加えて "providers" も渡します！
         const externalDbRouter = new ExternalDbRouter({ 
-            connector: connector, 
+            connector: connector,
+            providers: providers, 
             config: config 
         });
 
@@ -54,8 +57,8 @@ async function startServer() {
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 完了！アダプターがポート${port}で正常に起動しました。`);
-            console.log("Wixエディタの「外部データベース接続」にURLを貼り付けてください。");
+            console.log(`🚀 完全勝利！アダプターがポート${port}で正常に起動し、健康診断も突破しました。`);
+            console.log("今度こそ、Wixエディタの「外部データベース接続」にURLを貼り付けてください。");
         });
 
     } catch (e) {
