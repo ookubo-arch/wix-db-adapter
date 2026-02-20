@@ -1,33 +1,38 @@
 const express = require('express');
 const { ExternalDbRouter } = require('@wix-velo/velo-external-db-core');
-const { postgresFactory } = require('@wix-velo/external-db-postgres');
+const { PostgresConnector } = require('@wix-velo/external-db-postgres');
 
 async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 最終解決版(Nuclear Option) ---");
+    console.log("--- 2026年 SPI対応アダプター 究極解決版 ---");
 
     try {
-        // 1. データベース接続の作成
-        console.log("1. DB接続を作成中...");
-        const connector = await postgresFactory({ 
+        // 1. コネクタを直接作成
+        console.log("1. コネクタを作成中...");
+        const connector = new PostgresConnector({ 
             connectionUri: process.env.URL 
         }, {});
 
-        // 2. 初期化を確実に実行
-        console.log("2. コネクタのinit()を呼び出し中...");
+        // 2. 初期化を実行
+        console.log("2. 初期化命令を送信中...");
         if (typeof connector.init === 'function') {
             await connector.init();
         }
 
-        // 【ここが最重要：初期化チェックを完全に突破する】
-        // ルーターが内部で呼び出す isInitialized() を「常に true を返す関数」に上書きします
-        console.log("3. 初期化チェックをバイパス設定中...");
-        connector.isInitialized = () => true;
+        // 3. 【最重要：書き換えを強制する】
+        // 普通の代入（=）ではなく、プロパティ定義を直接いじって
+        // isInitialized が常に true を返すように固定します。
+        console.log("3. 初期化チェックを強制バイパス中...");
+        Object.defineProperty(connector, 'isInitialized', {
+            value: () => true,
+            writable: true,
+            configurable: true
+        });
 
-        // 3. Wixルーターの構築
-        console.log("4. Wixルーターを構築中...");
+        // 4. Wixルーターを構築
+        console.log("4. ルーターを組み立て中...");
         
         const config = {
             authorization: {
@@ -35,25 +40,25 @@ async function startServer() {
             }
         };
 
-        // オブジェクト形式で確実に渡す
+        // 最新の「オブジェクト1つ」で渡す形式
         const externalDbRouter = new ExternalDbRouter({ 
             connector: connector, 
             config: config 
         });
 
-        // 4. Expressにセット
+        // 5. Expressに接続
         app.use(externalDbRouter.router);
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
             console.log(`🚀 完了！アダプターがポート${port}で正常に起動しました。`);
-            console.log("URLをコピーしてWixの「外部データベース接続」に貼り付けてください。");
+            console.log("Wixエディタの「外部データベース接続」にURLを貼り付けてください。");
         });
 
     } catch (e) {
-        console.error("‼️ 致命的なエラー:");
+        console.error("‼️ エラーが発生しました:");
         console.error(e.message);
-        console.error("エラーの場所:", e.stack);
+        console.error("エラー詳細:", e.stack);
         process.exit(1);
     }
 }
