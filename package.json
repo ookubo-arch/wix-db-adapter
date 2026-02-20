@@ -6,7 +6,8 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "@wix-velo/velo-external-db": "2.1.20",
-    "@wix-velo/external-db-postgres": "2.1.20"
+    "@wix-velo/velo-external-db-core": "latest",
+    "@wix-velo/external-db-postgres": "latest",
+    "express": "latest"
   }
 }
