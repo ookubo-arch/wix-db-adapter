@@ -19,10 +19,10 @@ async function startServer() {
             await connector.init();
         }
 
-        // 2. Wixルーターの構築（ここで設定の仕方を修正しました！）
+        // 2. Wixルーターの構築
         console.log("Wixルーターを構築中...");
         
-        // 最新版は config.authorization.secretKey という構造を求めます
+        // 最新版は config.authorization.secretKey という二重構造を求めます
         const config = {
             authorization: {
                 secretKey: process.env.SECRET_KEY || "1234"
