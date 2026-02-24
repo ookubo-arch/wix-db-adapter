@@ -6,23 +6,6 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 究極のミドルウェア版 ---");
-
-    // 🌟🌟🌟 【ここが真の解決策】Wixの要求を前処理する「翻訳コンニャク」 🌟🌟🌟
-    // Wixが "test/stores" と言ってきたら、内部の公式ルーターに渡す前に
-    // こっそり "stores" に書き換えてしまう魔法のフィルターです。
-    app.use((req, res, next) => {
-        if (req.body) {
-            const stripPrefix = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
-
-            if (req.body.collectionName) req.body.collectionName = stripPrefix(req.body.collectionName);
-            if (req.body.collectionId) req.body.collectionId = stripPrefix(req.body.collectionId);
-            if (Array.isArray(req.body.schemaIds)) req.body.schemaIds = req.body.schemaIds.map(stripPrefix);
-            if (Array.isArray(req.body.collectionIds)) req.body.collectionIds = req.body.collectionIds.map(stripPrefix);
-        }
-        next();
-    });
-
     // ログ出力用
     app.use((req, res, next) => {
         console.log(`\n📥 [Wixから着信] ${req.method} ${req.path}`);
@@ -31,6 +14,18 @@ async function startServer() {
             console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}`);
             return originalJson.call(this, body);
         };
+        next();
+    });
+
+    console.log("--- 2026年 SPI対応アダプター ハイブリッド完全版 ---");
+
+    // 🌟 【データ処理用フィルター】
+    // Wixから送られてくる "test/stores" などの要求のうち、データ検索の宛先だけを綺麗にします
+    app.use((req, res, next) => {
+        const stripPrefix = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
+        if (req.body && req.body.collectionName) {
+            req.body.collectionName = stripPrefix(req.body.collectionName);
+        }
         next();
     });
 
@@ -62,17 +57,50 @@ async function startServer() {
             authorization: { secretKey: process.env.SECRET_KEY || "1234" }
         };
 
-        // 公式ルーター（並び替えやフィルターを自動処理してくれる超優秀なコア）
-        const externalDbRouter = new ExternalDbRouter({ 
-            connector, config, ...providers 
+        // 🌟🌟🌟 【手動処理ゾーン】接続維持・スキーマ用 🌟🌟🌟
+        // Wixとの「接続」を維持するため、IDのプレフィックスをWixの希望通りに返す窓口です
+
+        app.post('/provision', (req, res) => {
+            res.status(200).json({});
         });
 
-        // 特別窓口は廃止し、すべて公式ルーターに丸投げします！
+        app.post('/schemas/list', async (req, res) => {
+            try {
+                const schemas = await providers.schemaProvider.list();
+                res.status(200).json({ schemas: schemas });
+            } catch (e) {
+                res.status(500).json({ error: e.message });
+            }
+        });
+
+        app.post('/schemas/find', async (req, res) => {
+            try {
+                const schemaIds = req.body.schemaIds || [];
+                const stripPrefix = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
+                const cleanIds = schemaIds.map(stripPrefix);
+                
+                const allSchemas = await providers.schemaProvider.list();
+                const targetSchemas = allSchemas.filter(schema => cleanIds.includes(schema.id));
+                
+                // 【超重要】Wixが接続を切らないように、要求された通りのID（test/stores）で返す！
+                const resultSchemas = targetSchemas.map((schema, index) => {
+                    return { ...schema, id: schemaIds[index] };
+                });
+
+                res.status(200).json({ schemas: resultSchemas });
+            } catch (e) {
+                res.status(500).json({ error: e.message });
+            }
+        });
+
+        // 🌟🌟🌟 【自動処理ゾーン】データの取得・並び替え用 🌟🌟🌟
+        // 複雑な条件検索(filter/sort)は、Wix公式の優秀なルーターにすべて任せます
+        const externalDbRouter = new ExternalDbRouter({ connector, config, ...providers });
         app.use(externalDbRouter.router);
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 究極のミドルウェア版アダプターがポート${port}で待機中！`);
+            console.log(`🚀 ハイブリッド完全版アダプターがポート${port}で待機中！`);
         });
 
     } catch (e) {
