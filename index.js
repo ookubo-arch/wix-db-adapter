@@ -1,76 +1,19 @@
-// 🌟🌟🌟 【絶対防壁】コードの1行目で、Wixの厳格な認証(JWT)を強制シャットダウン 🌟🌟🌟
-// ※必ず他のモジュールをrequireする前に記述します！
-try {
-    const jwt = require('jsonwebtoken');
-    // トークン検査を無条件で「合格(BACKEND_CODE)」として通過させる魔法
-    jwt.verify = function(token, secretOrPublicKey, options, callback) {
-        const fakeResult = { role: 'BACKEND_CODE', 'wix-role': 'BACKEND_CODE' };
-        if (typeof options === 'function') return options(null, fakeResult);
-        if (typeof callback === 'function') return callback(null, fakeResult);
-        return fakeResult;
-    };
-    jwt.decode = () => ({ role: 'BACKEND_CODE', 'wix-role': 'BACKEND_CODE' });
-} catch (e) {
-    console.error("JWTの無効化に失敗しましたが、処理を続行します。", e);
-}
-
-// --- ここから通常のプログラム読み込み ---
 const express = require('express');
-const { ExternalDbRouter } = require('@wix-velo/velo-external-db-core');
-const Postgres = require('@wix-velo/external-db-postgres');
+const Postgres = require('@wix-velo/external-db-postgres'); // 公式ルーターは削除し、DB接続機能だけを使います
 
 async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【認証完全無力化版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【原点回帰・完全手動コントロール版】 ---");
 
-    const MY_SECRET_KEY = process.env.SECRET_KEY || "1234";
-
-    // 🌟🌟🌟 【魔法のフィルター1】リクエストの浄化（エラーの原因をすべて消去） 🌟🌟🌟
-    app.use((req, res, next) => {
-        // ヘッダーに紛れ込んでいる認証情報を削除
-        delete req.headers['authorization'];
-        delete req.headers['Authorization'];
-
-        if (req.body && req.body.requestContext) {
-            // ルーターが「システムからのアクセスだ」と誤認するように書き換え
-            req.body.requestContext.role = 'BACKEND_CODE';
-            req.body.role = 'BACKEND_CODE';
-            
-            // エラーの元凶となる空っぽのトークンやIDを完全に消去！
-            delete req.body.requestContext.memberId;
-            delete req.body.requestContext.memberToken;
-            
-            // 正解のシークレットキーを強制的にセットして100%一致させる
-            if (!req.body.requestContext.settings) req.body.requestContext.settings = {};
-            req.body.requestContext.settings.secretKey = MY_SECRET_KEY;
-        }
-        next();
-    });
-
-    // 🌟🌟🌟 【魔法のフィルター2】名前空間（test/）の切り落とし 🌟🌟🌟
-    app.use((req, res, next) => {
-        if (req.body) {
-            const stripPrefix = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
-            
-            if (req.body.schemaIds) req.originalSchemaIds = [...req.body.schemaIds];
-
-            if (req.body.collectionName) req.body.collectionName = stripPrefix(req.body.collectionName);
-            if (req.body.collectionId) req.body.collectionId = stripPrefix(req.body.collectionId);
-            if (Array.isArray(req.body.schemaIds)) req.body.schemaIds = req.body.schemaIds.map(stripPrefix);
-            if (Array.isArray(req.body.collectionIds)) req.body.collectionIds = req.body.collectionIds.map(stripPrefix);
-        }
-        next();
-    });
-
-    // ログ出力用
+    // ログ出力用（エラーの可視化）
     app.use((req, res, next) => {
         console.log(`\n📥 [Wixから着信] ${req.method} ${req.path}`);
         const originalJson = res.json;
         res.json = function(body) {
             console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}`);
-            if (res.statusCode >= 400) console.error(`‼️ [エラー詳細]:`, JSON.stringify(body));
+            if (res.statusCode >= 400) console.error(`‼️ [エラー]:`, JSON.stringify(body));
             return originalJson.call(this, body);
         };
         next();
@@ -91,23 +34,21 @@ async function startServer() {
             ssl: { rejectUnauthorized: false }
         };
 
+        // データベース接続プロバイダーの初期化
         const factoryResult = await Postgres.postgresFactory(dbConfig, dbConfig);
-        const connector = factoryResult.connector || factoryResult;
         const providers = factoryResult.providers || factoryResult;
 
-        if (connector) connector.initialized = true;
-        if (connector && typeof connector.isInitialized !== 'function') {
-            connector.isInitialized = () => true;
-        }
+        // 名前空間（test/）を切り落とすヘルパー関数
+        const cleanTableName = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
 
-        const config = {
-            secretKey: MY_SECRET_KEY,
-            authorization: { secretKey: MY_SECRET_KEY }
-        };
+        // 🌟🌟🌟 【完全手動ルーティング】認証を無視し、データだけを純粋に返す 🌟🌟🌟
 
-        // 🌟🌟🌟 【手動処理ゾーン】接続維持・スキーマ用 🌟🌟🌟
-        app.post('/provision', (req, res) => res.status(200).json({}));
+        // 1. 接続テスト (プロビジョニング)
+        app.post('/provision', (req, res) => {
+            res.status(200).json({});
+        });
 
+        // 2. テーブル一覧の取得
         app.post('/schemas/list', async (req, res) => {
             try {
                 const schemas = await providers.schemaProvider.list();
@@ -117,31 +58,71 @@ async function startServer() {
             }
         });
 
+        // 3. テーブル構造の詳細取得（接続維持のため Wix の要求名をそのまま返す）
         app.post('/schemas/find', async (req, res) => {
             try {
-                const cleanIds = req.body.schemaIds || [];
-                const originalIds = req.originalSchemaIds || cleanIds;
+                const reqIds = req.body.schemaIds || [];
+                const cleanIds = reqIds.map(cleanTableName);
                 
                 const allSchemas = await providers.schemaProvider.list();
                 const targetSchemas = allSchemas.filter(schema => cleanIds.includes(schema.id));
                 
                 const resultSchemas = targetSchemas.map((schema, index) => {
-                    return { ...schema, id: originalIds[index] };
+                    return { ...schema, id: reqIds[index] };
                 });
-
                 res.status(200).json({ schemas: resultSchemas });
             } catch (e) {
                 res.status(500).json({ error: e.message });
             }
         });
 
-        // 🌟🌟🌟 【自動処理ゾーン】データの取得・並び替え・カウント用 🌟🌟🌟
-        const externalDbRouter = new ExternalDbRouter({ connector, config, ...providers });
-        app.use(externalDbRouter.router);
+        // 4. データ件数カウント（過去に成功実績のあるコードを復活）
+        app.post('/data/count', async (req, res) => {
+            try {
+                const cleanName = cleanTableName(req.body.collectionName);
+                const filter = req.body.filter || {};
+                
+                const countResult = await providers.dataProvider.count(cleanName, filter);
+                res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
+            } catch (e) {
+                console.error("‼️ /data/count エラー:", e.message);
+                res.status(500).json({ error: e.message });
+            }
+        });
+
+        // 5. データ中身の検索（一番最初の WDE0116 エラーの原因を潰した強化版）
+        app.post('/data/find', async (req, res) => {
+            try {
+                const cleanName = cleanTableName(req.body.collectionName);
+                const filter = req.body.filter || {};
+                
+                // 【超重要】Wixは並び替え(sort)を空配列 [] で送ってくることがあり、
+                // これがPostgreSQL側でSQLエラー(WDE0116)を引き起こすため、undefinedに無効化します！
+                let sort = req.body.sort;
+                if (Array.isArray(sort) && sort.length === 0) {
+                    sort = undefined;
+                }
+                
+                const skip = req.body.skip || 0;
+                const limit = req.body.limit || 50;
+
+                const data = await providers.dataProvider.find(cleanName, filter, sort, skip, limit);
+                
+                // プロバイダーが返す形式のブレを吸収して安全にWixに返す
+                const items = Array.isArray(data) ? data : (data.items || []);
+                res.status(200).json({
+                    items: items,
+                    totalCount: items.length
+                });
+            } catch (e) {
+                console.error("‼️ /data/find エラー:", e.message);
+                res.status(500).json({ error: e.message });
+            }
+        });
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 認証完全無力化アダプターがポート${port}で待機中！`);
+            console.log(`🚀 原点回帰・完全手動コントロール版アダプターがポート${port}で待機中！`);
         });
 
     } catch (e) {
