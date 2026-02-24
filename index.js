@@ -17,7 +17,7 @@ async function startServer() {
         next();
     });
 
-    console.log("--- 2026年 SPI対応アダプター 究極互換版（名前空間カット対応） ---");
+    console.log("--- 2026年 SPI対応アダプター 究極互換版（最終完成版） ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -51,42 +51,62 @@ async function startServer() {
             connector, config, ...providers 
         });
 
-        // 🌟🌟🌟 【追加機能】名前空間（プレフィックス）を取り除くヘルパー関数 🌟🌟🌟
-        // Wixから "test/stores" と来たら "stores" に変換する魔法の関数です。
+        // 🌟 名前空間（プレフィックス）を取り除く魔法の関数 🌟
         const cleanTableName = (rawName) => {
             if (typeof rawName === 'string' && rawName.includes('/')) {
                 const cleanName = rawName.split('/').pop();
-                console.log(`🔄 [自動翻訳] テーブル名を '${rawName}' から '${cleanName}' に変換しました。`);
+                console.log(`🔄 [自動翻訳] '${rawName}' -> '${cleanName}'`);
                 return cleanName;
             }
             return rawName;
         };
 
-        // 🌟🌟🌟 【特別窓口】 🌟🌟🌟
+        // 🌟🌟🌟 【特別窓口】Wixのすべての要求をここで受け止めます 🌟🌟🌟
 
         // 1. 最初の挨拶 (provision)
         app.post('/provision', (req, res) => {
-            console.log("🛠️ [V2互換窓口] Wixからの挨拶を「成功(200)」として受け入れました！");
+            console.log("🛠️ [特別窓口] 挨拶を成功(200)として受け入れました");
             res.status(200).json({});
         });
 
         // 2. テーブル一覧の要求 (schemas/list)
         app.post('/schemas/list', async (req, res) => {
-            console.log("🛠️ [V2互換窓口] テーブル一覧を要求されました。Postgresから読み取ります...");
+            console.log("🛠️ [特別窓口] テーブル一覧を要求されました");
             try {
                 const schemas = await providers.schemaProvider.list();
                 res.status(200).json({ schemas: schemas });
             } catch (e) {
-                console.error("‼️ テーブル読み取りエラー:", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
-        // 3. データの中身の要求 (data/find)
-        app.post('/data/find', async (req, res) => {
-            console.log("🛠️ [V2互換窓口] データ検索を要求されました！");
+        // 3. ✨追加✨ テーブル構造の詳細要求 (schemas/find)
+        // ここが欠けていたため 401 エラーになっていました！
+        app.post('/schemas/find', async (req, res) => {
+            console.log("🛠️ [特別窓口] テーブル詳細(schemas/find)を要求されました");
             try {
-                // ここでヘルパー関数を使って、テーブル名を綺麗にします！
+                const schemaIds = req.body.schemaIds || [];
+                const cleanIds = schemaIds.map(id => cleanTableName(id));
+                
+                const allSchemas = await providers.schemaProvider.list();
+                const targetSchemas = allSchemas.filter(schema => cleanIds.includes(schema.id));
+                
+                // Wixが混乱しないように、idを "test/stores" の形に戻してあげる
+                const resultSchemas = targetSchemas.map((schema, index) => {
+                    return { ...schema, id: schemaIds[index] };
+                });
+
+                res.status(200).json({ schemas: resultSchemas });
+            } catch (e) {
+                console.error("‼️ テーブル詳細エラー:", e.message);
+                res.status(500).json({ error: e.message });
+            }
+        });
+
+        // 4. データの中身の要求 (data/find)
+        app.post('/data/find', async (req, res) => {
+            console.log("🛠️ [特別窓口] データ検索を要求されました");
+            try {
                 const cleanName = cleanTableName(req.body.collectionName);
                 const { filter, sort, skip, limit } = req.body;
                 
@@ -97,36 +117,31 @@ async function startServer() {
                     res.status(200).json({ items: data || [], totalCount: (data || []).length });
                 }
             } catch (e) {
-                console.error("‼️ データ検索エラー:", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
-        // 4. ✨追加✨ データの「件数」の要求 (data/count)
-        // Wixのエラーログ (operation: "count") はこれが無かったため発生していました。
+        // 5. データの件数カウント要求 (data/count)
         app.post('/data/count', async (req, res) => {
-            console.log("🛠️ [V2互換窓口] データの件数カウントを要求されました！");
+            console.log("🛠️ [特別窓口] 件数カウントを要求されました");
             try {
-                // こちらもテーブル名を綺麗にします
                 const cleanName = cleanTableName(req.body.collectionName);
                 const { filter } = req.body;
                 
                 const countResult = await providers.dataProvider.count(cleanName, filter || {});
                 res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
             } catch (e) {
-                console.error("‼️ データカウントエラー:", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
         // 🌟🌟🌟 ここまで 🌟🌟🌟
 
-        // 最新のV3ルーターも一応有効にしておく
         app.use(externalDbRouter.router);
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 完璧な互換アダプターがポート${port}で待機中！`);
+            console.log(`🚀 最終完成版アダプターがポート${port}で待機中！`);
         });
 
     } catch (e) {
