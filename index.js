@@ -5,7 +5,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【原点回帰・findバグ修正版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【findバグ完全討伐版】 ---");
 
     app.use((req, res, next) => {
         console.log(`\n📥 [Wixから着信] ${req.method} ${req.path}`);
@@ -51,7 +51,7 @@ async function startServer() {
             }
         });
 
-        // 3. テーブル構造（名前空間の偽装維持）
+        // 3. テーブル構造
         app.post('/schemas/find', async (req, res) => {
             try {
                 const reqIds = req.body.schemaIds || [];
@@ -69,7 +69,7 @@ async function startServer() {
             }
         });
 
-        // 4. データ件数カウント（成功済みのロジック）
+        // 4. データ件数カウント（成功済）
         app.post('/data/count', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
@@ -78,23 +78,27 @@ async function startServer() {
                 const countResult = await providers.dataProvider.count(cleanName, filter);
                 res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
             } catch (e) {
-                console.error("‼️ /data/count エラー:", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
-        // 5. 🌟 データの中身（ここで起きていた map エラーを解決！） 🌟
+        // 5. 🌟 データ検索（mapエラーを解決した完全版） 🌟
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
                 
-                // 【修正ポイント】ドライバーが map でクラッシュしないよう、常に配列とオブジェクトを保証する
+                // 変数をすべて安全な形（配列やオブジェクト）に保証する
                 const filter = req.body.filter || {};
-                const sort = Array.isArray(req.body.sort) ? req.body.sort : []; 
+                const sort = Array.isArray(req.body.sort) ? req.body.sort : [];
                 const skip = req.body.skip || 0;
                 const limit = req.body.limit || 50;
 
-                const data = await providers.dataProvider.find(cleanName, filter, sort, skip, limit);
+                // 【完全解決の鍵】6番目の引数（projection）が undefined だとエラーになるため、
+                // 強制的に空の配列 [] を渡すことでドライバーを安心させます。
+                const projection = Array.isArray(req.body.projection) ? req.body.projection : [];
+
+                // 6つの引数をすべて渡す！
+                const data = await providers.dataProvider.find(cleanName, filter, sort, skip, limit, projection);
                 
                 const items = data && data.items ? data.items : (Array.isArray(data) ? data : []);
                 res.status(200).json({
@@ -109,7 +113,7 @@ async function startServer() {
 
         const port = process.env.PORT || 10000;
         app.listen(port, () => {
-            console.log(`🚀 findバグ修正版アダプターがポート${port}で待機中！`);
+            console.log(`🚀 バグ完全討伐版アダプターがポート${port}で待機中！`);
         });
 
     } catch (e) {
