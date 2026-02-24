@@ -5,32 +5,15 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【findバグ完全討伐版】 ---");
-
-    app.use((req, res, next) => {
-        console.log(`\n📥 [Wixから着信] ${req.method} ${req.path}`);
-        const originalJson = res.json;
-        res.json = function(body) {
-            console.log(`📤 [Wixへ返信] ステータス: ${res.statusCode}`);
-            if (res.statusCode >= 400) console.error(`‼️ [エラー]:`, JSON.stringify(body));
-            return originalJson.call(this, body);
-        };
-        next();
-    });
+    console.log("--- 2026年 SPI対応アダプター 【強制マッピング・最終版】 ---");
 
     try {
         const dbUrlString = process.env.URL;
-        if (!dbUrlString) throw new Error("環境変数 'URL' が設定されていません。");
-        
         const dbUrl = new URL(dbUrlString);
         const dbConfig = {
-            host: dbUrl.hostname,
-            user: dbUrl.username,
-            password: dbUrl.password,
-            db: dbUrl.pathname.slice(1),
-            port: Number(dbUrl.port) || 5432,
-            connectionUri: dbUrlString,
-            ssl: { rejectUnauthorized: false }
+            host: dbUrl.hostname, user: dbUrl.username, password: dbUrl.password,
+            db: dbUrl.pathname.slice(1), port: Number(dbUrl.port) || 5432,
+            connectionUri: dbUrlString, ssl: { rejectUnauthorized: false }
         };
 
         const factoryResult = await Postgres.postgresFactory(dbConfig, dbConfig);
@@ -38,88 +21,68 @@ async function startServer() {
 
         const cleanTableName = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
 
-        // 1. 接続テスト
         app.post('/provision', (req, res) => res.status(200).json({}));
 
-        // 2. テーブル一覧
-        app.post('/schemas/list', async (req, res) => {
-            try {
-                const schemas = await providers.schemaProvider.list();
-                res.status(200).json({ schemas: schemas });
-            } catch (e) {
-                res.status(500).json({ error: e.message });
-            }
-        });
-
-        // 3. テーブル構造
+        // スキーマ報告：Wixに「必ず _id があるよ」と嘘偽りなく報告する
         app.post('/schemas/find', async (req, res) => {
             try {
                 const reqIds = req.body.schemaIds || [];
-                const cleanIds = reqIds.map(cleanTableName);
-                
-                const allSchemas = await providers.schemaProvider.list();
-                const targetSchemas = allSchemas.filter(schema => cleanIds.includes(schema.id));
-                
-                const resultSchemas = targetSchemas.map((schema, index) => {
-                    return { ...schema, id: reqIds[index] };
-                });
-                res.status(200).json({ schemas: resultSchemas });
-            } catch (e) {
-                res.status(500).json({ error: e.message });
-            }
+                const allRaw = await providers.schemaProvider.list();
+                const schemas = reqIds.map(wixId => {
+                    const raw = allRaw.find(s => s.id === cleanTableName(wixId));
+                    if (!raw) return null;
+                    
+                    // 既存のフィールドに _id を強制追加して報告
+                    const fields = { ...raw.fields.reduce((acc, f) => {
+                        acc[f.id] = { displayName: f.id, type: f.type === 'number' ? 'number' : 'text' };
+                        return acc;
+                    }, {}) };
+                    fields["_id"] = { displayName: "_id", type: "text" };
+
+                    return { id: wixId, displayName: cleanTableName(wixId), fields };
+                }).filter(Boolean);
+                res.status(200).json({ schemas });
+            } catch (e) { res.status(500).json({ error: e.message }); }
         });
 
-        // 4. データ件数カウント（成功済）
         app.post('/data/count', async (req, res) => {
-            try {
-                const cleanName = cleanTableName(req.body.collectionName);
-                const filter = req.body.filter || {};
-                
-                const countResult = await providers.dataProvider.count(cleanName, filter);
-                res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
-            } catch (e) {
-                res.status(500).json({ error: e.message });
-            }
+            const count = await providers.dataProvider.count(cleanTableName(req.body.collectionName), req.body.filter || {});
+            res.status(200).json({ totalCount: count.totalCount || count || 0 });
         });
 
-        // 5. 🌟 データ検索（mapエラーを解決した完全版） 🌟
+        // データ返却：ここが本丸です
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
+                const data = await providers.dataProvider.find(
+                    cleanName, req.body.filter || {}, 
+                    Array.isArray(req.body.sort) ? req.body.sort : [], 
+                    req.body.skip || 0, req.body.limit || 50, 
+                    Array.isArray(req.body.projection) ? req.body.projection : []
+                );
                 
-                // 変数をすべて安全な形（配列やオブジェクト）に保証する
-                const filter = req.body.filter || {};
-                const sort = Array.isArray(req.body.sort) ? req.body.sort : [];
-                const skip = req.body.skip || 0;
-                const limit = req.body.limit || 50;
+                const rawItems = data && data.items ? data.items : (Array.isArray(data) ? data : []);
 
-                // 【完全解決の鍵】6番目の引数（projection）が undefined だとエラーになるため、
-                // 強制的に空の配列 [] を渡すことでドライバーを安心させます。
-                const projection = Array.isArray(req.body.projection) ? req.body.projection : [];
-
-                // 6つの引数をすべて渡す！
-                const data = await providers.dataProvider.find(cleanName, filter, sort, skip, limit, projection);
-                
-                const items = data && data.items ? data.items : (Array.isArray(data) ? data : []);
-                res.status(200).json({
-                    items: items,
-                    totalCount: items.length
+                // 🌟 超重要：全アイテムに対して _id を物理的に付与する
+                const items = rawItems.map(item => {
+                    const newItem = { ...item };
+                    // PostgreSQLの 'id' を Wixの '_id' にコピー
+                    if (item.id) {
+                        newItem._id = String(item.id);
+                    } else {
+                        // idがない場合、最初の列の値をIDにする（苦肉の策）
+                        const firstValue = Object.values(item)[0];
+                        newItem._id = String(firstValue || Math.random());
+                    }
+                    return newItem;
                 });
-            } catch (e) {
-                console.error("‼️ /data/find エラー:", e.message);
-                res.status(500).json({ error: e.message });
-            }
+
+                console.log(`📤 ${items.length}件のデータを送信。1件目のサンプル:`, JSON.stringify(items[0]));
+                res.status(200).json({ items, totalCount: items.length });
+            } catch (e) { res.status(500).json({ error: e.message }); }
         });
 
-        const port = process.env.PORT || 10000;
-        app.listen(port, () => {
-            console.log(`🚀 バグ完全討伐版アダプターがポート${port}で待機中！`);
-        });
-
-    } catch (e) {
-        console.error("‼️ 起動エラー:", e.message);
-        process.exit(1);
-    }
+        app.listen(process.env.PORT || 10000);
+    } catch (e) { process.exit(1); }
 }
-
 startServer();
