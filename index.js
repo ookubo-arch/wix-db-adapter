@@ -5,7 +5,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【データ取得バグ修正版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【データ取得 最終修正版】 ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -81,25 +81,29 @@ async function startServer() {
             res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
         });
 
-        // 🌟 データ取得（バグ修正箇所） 🌟
+        // 🌟 データ取得（ここが最終修正箇所です） 🌟
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
                 
-                // 🚀 修正ポイント: Wixからのリクエストが空配列[]の場合はundefinedに変換し、全カラムを取得させる
-                let fetchProjection = req.body.projection;
-                if (Array.isArray(fetchProjection) && fetchProjection.length === 0) {
-                    fetchProjection = undefined;
-                }
-
-                const data = await providers.dataProvider.find(
+                // 引数を動的に組み立てる（まずは基本の5つの引数）
+                const findArgs = [
                     cleanName, 
                     req.body.filter || {}, 
                     Array.isArray(req.body.sort) ? req.body.sort : [], 
                     req.body.skip || 0, 
-                    req.body.limit || 50, 
-                    fetchProjection // 正しく列指定またはundefinedを渡す
-                );
+                    req.body.limit || 50
+                ];
+
+                // 🚀 Wixから列の指定がある場合のみ、_id と id を強制追加して第6引数として渡す
+                // 指定がない（または空配列の）場合は、引数自体を省略することでエラーを防ぎ、全カラム取得させる
+                if (Array.isArray(req.body.projection) && req.body.projection.length > 0) {
+                    const safeProjection = Array.from(new Set([...req.body.projection, '_id', 'id']));
+                    findArgs.push(safeProjection);
+                }
+
+                // 動的に組み立てた引数を展開して実行
+                const data = await providers.dataProvider.find(...findArgs);
                 
                 const rawItems = data && data.items ? data.items : (Array.isArray(data) ? data : []);
 
@@ -112,8 +116,9 @@ async function startServer() {
                     } else if (item.id !== undefined && item.id !== null) {
                         finalItem._id = String(item.id);
                     } else {
-                        // どうしても見つからない場合のみランダムID（通常はここに落ちません）
-                        finalItem._id = Math.random().toString(36).substr(2, 9);
+                        // PKが見つからない場合のフォールバック
+                        const firstKey = Object.keys(item).find(k => k !== '_id' && k !== 'id');
+                        finalItem._id = firstKey && item[firstKey] ? String(item[firstKey]) : Math.random().toString(36).substr(2, 9);
                     }
                     
                     return finalItem;
@@ -130,7 +135,7 @@ async function startServer() {
         });
 
         const port = process.env.PORT || 10000;
-        app.listen(port, () => console.log(`🚀 データ取得修正版アダプター起動中！ ポート:${port}`));
+        app.listen(port, () => console.log(`🚀 データ取得 最終修正版アダプター起動中！ ポート:${port}`));
 
     } catch (e) {
         console.error("‼️ 起動エラー:", e.message);
