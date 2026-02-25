@@ -5,7 +5,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【データ取得 最終修正版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【取得カラム明示・安定版】 ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -81,42 +81,49 @@ async function startServer() {
             res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
         });
 
-        // 🌟 データ取得（ここが最終修正箇所です） 🌟
+        // 🌟 データ取得（ここを修正） 🌟
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
                 
-                // 引数を動的に組み立てる（まずは基本の5つの引数）
-                const findArgs = [
+                let fetchProjection = req.body.projection;
+
+                // 🚀 修正ポイント: 列の指定がない（空配列など）の場合、スキーマから全カラム名を自動取得して明示的に渡す
+                if (!Array.isArray(fetchProjection) || fetchProjection.length === 0) {
+                    const allSchemas = await providers.schemaProvider.list();
+                    const tableSchema = allSchemas.find(s => cleanTableName(s.id) === cleanName);
+                    
+                    if (tableSchema && tableSchema.fields) {
+                        fetchProjection = tableSchema.fields.map(f => f.field || f.name).filter(Boolean);
+                    } else {
+                        // スキーマが取れなかった場合の最後の手段
+                        fetchProjection = ['*']; 
+                    }
+                } else {
+                    // Wixから特定の列だけ要求された場合も、_idが漏れないように追加
+                    if (!fetchProjection.includes('_id')) fetchProjection.push('_id');
+                    if (!fetchProjection.includes('id')) fetchProjection.push('id');
+                }
+
+                const data = await providers.dataProvider.find(
                     cleanName, 
                     req.body.filter || {}, 
                     Array.isArray(req.body.sort) ? req.body.sort : [], 
                     req.body.skip || 0, 
-                    req.body.limit || 50
-                ];
-
-                // 🚀 Wixから列の指定がある場合のみ、_id と id を強制追加して第6引数として渡す
-                // 指定がない（または空配列の）場合は、引数自体を省略することでエラーを防ぎ、全カラム取得させる
-                if (Array.isArray(req.body.projection) && req.body.projection.length > 0) {
-                    const safeProjection = Array.from(new Set([...req.body.projection, '_id', 'id']));
-                    findArgs.push(safeProjection);
-                }
-
-                // 動的に組み立てた引数を展開して実行
-                const data = await providers.dataProvider.find(...findArgs);
+                    req.body.limit || 50, 
+                    fetchProjection // 曖昧さをなくした確実な配列を渡す
+                );
                 
                 const rawItems = data && data.items ? data.items : (Array.isArray(data) ? data : []);
 
                 const items = rawItems.map(item => {
                     const finalItem = { ...item };
                     
-                    // DBのデータから _id を探し出し、確実に文字列としてマッピングする
                     if (item._id !== undefined && item._id !== null) {
                         finalItem._id = String(item._id);
                     } else if (item.id !== undefined && item.id !== null) {
                         finalItem._id = String(item.id);
                     } else {
-                        // PKが見つからない場合のフォールバック
                         const firstKey = Object.keys(item).find(k => k !== '_id' && k !== 'id');
                         finalItem._id = firstKey && item[firstKey] ? String(item[firstKey]) : Math.random().toString(36).substr(2, 9);
                     }
@@ -129,13 +136,14 @@ async function startServer() {
                     totalCount: data.totalCount !== undefined ? data.totalCount : items.length 
                 });
             } catch (e) {
+                // ここでエラー内容をサーバーのログに出力
                 console.error("[find Error]", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
         const port = process.env.PORT || 10000;
-        app.listen(port, () => console.log(`🚀 データ取得 最終修正版アダプター起動中！ ポート:${port}`));
+        app.listen(port, () => console.log(`🚀 取得カラム明示・安定版アダプター起動中！ ポート:${port}`));
 
     } catch (e) {
         console.error("‼️ 起動エラー:", e.message);
