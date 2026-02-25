@@ -5,7 +5,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【全カラム強制取得・完全版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【データ取得バグ修正版】 ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -81,19 +81,24 @@ async function startServer() {
             res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
         });
 
-        // 🌟 データ取得（ここが今回の修正の肝です）🌟
+        // 🌟 データ取得（バグ修正箇所） 🌟
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
                 
-                // 🚀 修正ポイント: req.body.projection を無視し、空配列 [] を渡すことで強制的に全カラム（SELECT *）を取得します
+                // 🚀 修正ポイント: Wixからのリクエストが空配列[]の場合はundefinedに変換し、全カラムを取得させる
+                let fetchProjection = req.body.projection;
+                if (Array.isArray(fetchProjection) && fetchProjection.length === 0) {
+                    fetchProjection = undefined;
+                }
+
                 const data = await providers.dataProvider.find(
                     cleanName, 
                     req.body.filter || {}, 
                     Array.isArray(req.body.sort) ? req.body.sort : [], 
                     req.body.skip || 0, 
                     req.body.limit || 50, 
-                    []  // ← どんなリクエストが来ても全データを取得！
+                    fetchProjection // 正しく列指定またはundefinedを渡す
                 );
                 
                 const rawItems = data && data.items ? data.items : (Array.isArray(data) ? data : []);
@@ -101,22 +106,18 @@ async function startServer() {
                 const items = rawItems.map(item => {
                     const finalItem = { ...item };
                     
-                    // _id の確実なマッピング（大文字小文字の揺らぎにも対応）
-                    const dbIdValue = item._id !== undefined ? item._id : (item.id !== undefined ? item.id : null);
-                    
-                    if (dbIdValue !== null) {
-                        finalItem._id = String(dbIdValue);
+                    // DBのデータから _id を探し出し、確実に文字列としてマッピングする
+                    if (item._id !== undefined && item._id !== null) {
+                        finalItem._id = String(item._id);
+                    } else if (item.id !== undefined && item.id !== null) {
+                        finalItem._id = String(item.id);
                     } else {
-                        // DB側にidが見つからない場合の最終手段
-                        const firstKey = Object.keys(item).find(k => k.toLowerCase() !== '_id' && k.toLowerCase() !== 'id');
-                        finalItem._id = firstKey ? String(item[firstKey]) : Math.random().toString(36).substr(2, 9);
+                        // どうしても見つからない場合のみランダムID（通常はここに落ちません）
+                        finalItem._id = Math.random().toString(36).substr(2, 9);
                     }
                     
                     return finalItem;
                 });
-
-                // デバッグ用のログを出力（サーバー側で何が取れているか確認可能にしました）
-                console.log(`[find] ${cleanName} | 取得件数: ${items.length} | 先頭_id: ${items.length > 0 ? items[0]._id : 'なし'}`);
 
                 res.status(200).json({ 
                     items, 
@@ -129,7 +130,7 @@ async function startServer() {
         });
 
         const port = process.env.PORT || 10000;
-        app.listen(port, () => console.log(`🚀 全カラム取得・完全版アダプター起動中！ ポート:${port}`));
+        app.listen(port, () => console.log(`🚀 データ取得修正版アダプター起動中！ ポート:${port}`));
 
     } catch (e) {
         console.error("‼️ 起動エラー:", e.message);
