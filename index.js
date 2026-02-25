@@ -5,7 +5,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【スキーマ強制同期・修正版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【全カラム強制取得・完全版】 ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -25,7 +25,7 @@ async function startServer() {
 
         const cleanTableName = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
 
-        // 🌟 スキーマ（フィールド定義）をWix用に変換する関数 🌟
+        // 🌟 スキーマ変換 🌟
         const translateSchema = (wixId, pgSchema) => {
             return {
                 id: wixId,
@@ -33,20 +33,17 @@ async function startServer() {
                 allowedOperations: ["get", "find", "count"],
                 maxPageSize: 50,
                 ttl: 3600,
-                // 各カラムの定義を変換
                 fields: pgSchema.fields.reduce((acc, f) => {
-                    // 修正: 'id' ではなく 'field' または 'name' プロパティを参照する
                     const fieldName = f.field || f.name;
-                    if (!fieldName || fieldName === '_id') return acc; // _idは下で明示的に定義するのでスキップ
+                    if (!fieldName || fieldName === '_id') return acc;
 
                     acc[fieldName] = {
                         displayName: fieldName,
-                        type: f.type === 'number' ? 'number' : 'text', 
+                        type: f.type === 'number' ? 'number' : 'text',
                         queryOperators: ["eq", "ne", "contains", "startsWith", "endsWith", "gt", "lt", "gte", "lte"]
                     };
                     return acc;
                 }, {
-                    // _id フィールドを強制的に含める（Wix必須要件）
                     "_id": { displayName: "_id", type: "text", queryOperators: ["eq", "ne", "hasSome"] }
                 })
             };
@@ -54,7 +51,6 @@ async function startServer() {
 
         app.post('/provision', (req, res) => res.status(200).json({}));
 
-        // 🌟 スキーマ一覧 🌟
         app.post('/schemas/list', async (req, res) => {
             try {
                 const results = await providers.schemaProvider.list();
@@ -65,17 +61,14 @@ async function startServer() {
             }
         });
 
-        // 🌟 スキーマ詳細 🌟
         app.post('/schemas/find', async (req, res) => {
             try {
                 const reqIds = req.body.schemaIds || [];
                 const allRaw = await providers.schemaProvider.list();
-                
                 const schemas = reqIds.map(wixId => {
                     const raw = allRaw.find(s => s.id === cleanTableName(wixId));
                     return raw ? translateSchema(wixId, raw) : null;
                 }).filter(Boolean);
-
                 res.status(200).json({ schemas });
             } catch (e) {
                 res.status(500).json({ error: e.message });
@@ -88,44 +81,55 @@ async function startServer() {
             res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
         });
 
-        // 🌟 データ取得（_idマッピング修正）🌟
+        // 🌟 データ取得（ここが今回の修正の肝です）🌟
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
+                
+                // 🚀 修正ポイント: req.body.projection を無視し、空配列 [] を渡すことで強制的に全カラム（SELECT *）を取得します
                 const data = await providers.dataProvider.find(
                     cleanName, 
                     req.body.filter || {}, 
                     Array.isArray(req.body.sort) ? req.body.sort : [], 
                     req.body.skip || 0, 
                     req.body.limit || 50, 
-                    Array.isArray(req.body.projection) ? req.body.projection : []
+                    []  // ← どんなリクエストが来ても全データを取得！
                 );
+                
                 const rawItems = data && data.items ? data.items : (Array.isArray(data) ? data : []);
 
                 const items = rawItems.map(item => {
                     const finalItem = { ...item };
                     
-                    // 修正: _id がすでに存在する場合は文字列化、なければ id を _id にマッピング
-                    if (item._id) {
-                        finalItem._id = String(item._id);
-                    } else if (item.id) {
-                        finalItem._id = String(item.id);
+                    // _id の確実なマッピング（大文字小文字の揺らぎにも対応）
+                    const dbIdValue = item._id !== undefined ? item._id : (item.id !== undefined ? item.id : null);
+                    
+                    if (dbIdValue !== null) {
+                        finalItem._id = String(dbIdValue);
                     } else {
-                        // テーブルに id も _id も無い場合、最初のカラムの値を仮の _id とする
-                        const firstKey = Object.keys(item).find(k => k !== '_id');
+                        // DB側にidが見つからない場合の最終手段
+                        const firstKey = Object.keys(item).find(k => k.toLowerCase() !== '_id' && k.toLowerCase() !== 'id');
                         finalItem._id = firstKey ? String(item[firstKey]) : Math.random().toString(36).substr(2, 9);
                     }
+                    
                     return finalItem;
                 });
 
-                res.status(200).json({ items, totalCount: items.length });
+                // デバッグ用のログを出力（サーバー側で何が取れているか確認可能にしました）
+                console.log(`[find] ${cleanName} | 取得件数: ${items.length} | 先頭_id: ${items.length > 0 ? items[0]._id : 'なし'}`);
+
+                res.status(200).json({ 
+                    items, 
+                    totalCount: data.totalCount !== undefined ? data.totalCount : items.length 
+                });
             } catch (e) {
+                console.error("[find Error]", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
         const port = process.env.PORT || 10000;
-        app.listen(port, () => console.log(`🚀 スキーマ同期版起動中！ ポート:${port}`));
+        app.listen(port, () => console.log(`🚀 全カラム取得・完全版アダプター起動中！ ポート:${port}`));
 
     } catch (e) {
         console.error("‼️ 起動エラー:", e.message);
