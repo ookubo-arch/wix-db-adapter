@@ -5,7 +5,34 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【取得カラム明示・安定版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【セキュリティ実装・完全安定版】 ---");
+
+    // 🌟 1. セキュリティ設定（環境変数から鍵を読み込む） 🌟
+    const SECRET_KEY = process.env.SECRET_KEY;
+
+    // もしサーバー側に鍵が設定されていなかったら、危険なので起動させない
+    if (!SECRET_KEY) {
+        console.error("‼️ 致命的エラー: SECRET_KEY（環境変数）が設定されていません。サーバーを停止します。");
+        process.exit(1);
+    }
+
+    // 🌟 2. 認証ミドルウェア（関所） 🌟
+    const authMiddleware = (req, res, next) => {
+        // Wixはダッシュボードで設定した非公開鍵を、毎回ここに忍ばせて送ってきます
+        const providedKey = req.body?.requestContext?.settings?.secretKey;
+
+        if (providedKey === SECRET_KEY) {
+            // 合言葉が一致した場合のみ、データベース操作へ進む
+            next();
+        } else {
+            // 合言葉が違う、または無い場合はアクセスを弾く
+            console.warn("⚠️ 不正なアクセスをブロックしました。提供されたキー:", providedKey);
+            res.status(401).json({ error: "Unauthorized: シークレットキーが一致しません" });
+        }
+    };
+
+    // すべての通信に対してこの関所を適用します
+    app.use(authMiddleware);
 
     try {
         const dbUrlString = process.env.URL;
@@ -81,14 +108,13 @@ async function startServer() {
             res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
         });
 
-        // 🌟 データ取得（ここを修正） 🌟
+        // 🌟 データ取得 🌟
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
                 
                 let fetchProjection = req.body.projection;
 
-                // 🚀 修正ポイント: 列の指定がない（空配列など）の場合、スキーマから全カラム名を自動取得して明示的に渡す
                 if (!Array.isArray(fetchProjection) || fetchProjection.length === 0) {
                     const allSchemas = await providers.schemaProvider.list();
                     const tableSchema = allSchemas.find(s => cleanTableName(s.id) === cleanName);
@@ -96,11 +122,9 @@ async function startServer() {
                     if (tableSchema && tableSchema.fields) {
                         fetchProjection = tableSchema.fields.map(f => f.field || f.name).filter(Boolean);
                     } else {
-                        // スキーマが取れなかった場合の最後の手段
                         fetchProjection = ['*']; 
                     }
                 } else {
-                    // Wixから特定の列だけ要求された場合も、_idが漏れないように追加
                     if (!fetchProjection.includes('_id')) fetchProjection.push('_id');
                     if (!fetchProjection.includes('id')) fetchProjection.push('id');
                 }
@@ -111,7 +135,7 @@ async function startServer() {
                     Array.isArray(req.body.sort) ? req.body.sort : [], 
                     req.body.skip || 0, 
                     req.body.limit || 50, 
-                    fetchProjection // 曖昧さをなくした確実な配列を渡す
+                    fetchProjection 
                 );
                 
                 const rawItems = data && data.items ? data.items : (Array.isArray(data) ? data : []);
@@ -136,14 +160,13 @@ async function startServer() {
                     totalCount: data.totalCount !== undefined ? data.totalCount : items.length 
                 });
             } catch (e) {
-                // ここでエラー内容をサーバーのログに出力
                 console.error("[find Error]", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
         const port = process.env.PORT || 10000;
-        app.listen(port, () => console.log(`🚀 取得カラム明示・安定版アダプター起動中！ ポート:${port}`));
+        app.listen(port, () => console.log(`🚀 セキュリティ実装・完全安定版アダプター起動中！ ポート:${port}`));
 
     } catch (e) {
         console.error("‼️ 起動エラー:", e.message);
