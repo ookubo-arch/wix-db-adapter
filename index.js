@@ -5,7 +5,7 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【スキーマ強制同期版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【スキーマ強制同期・修正版】 ---");
 
     try {
         const dbUrlString = process.env.URL;
@@ -28,22 +28,26 @@ async function startServer() {
         // 🌟 スキーマ（フィールド定義）をWix用に変換する関数 🌟
         const translateSchema = (wixId, pgSchema) => {
             return {
-                id: wixId, // test/table_name の形式を維持
+                id: wixId,
                 displayName: cleanTableName(wixId),
-                allowedOperations: ["get", "find", "count"], // 読み取り専用に制限して安定化
+                allowedOperations: ["get", "find", "count"],
                 maxPageSize: 50,
                 ttl: 3600,
                 // 各カラムの定義を変換
-                fields: pgSchema.fields.reduce((acc, field) => {
-                    acc[field.id] = {
-                        displayName: field.id,
-                        type: field.type === 'number' ? 'number' : 'text', // 基本はtextかnumber
+                fields: pgSchema.fields.reduce((acc, f) => {
+                    // 修正: 'id' ではなく 'field' または 'name' プロパティを参照する
+                    const fieldName = f.field || f.name;
+                    if (!fieldName || fieldName === '_id') return acc; // _idは下で明示的に定義するのでスキップ
+
+                    acc[fieldName] = {
+                        displayName: fieldName,
+                        type: f.type === 'number' ? 'number' : 'text', 
                         queryOperators: ["eq", "ne", "contains", "startsWith", "endsWith", "gt", "lt", "gte", "lte"]
                     };
                     return acc;
                 }, {
-                    // _id フィールドを強制的に含める
-                    "_id": { displayName: "_id", type: "text", queryOperators: ["eq"] }
+                    // _id フィールドを強制的に含める（Wix必須要件）
+                    "_id": { displayName: "_id", type: "text", queryOperators: ["eq", "ne", "hasSome"] }
                 })
             };
         };
@@ -61,11 +65,10 @@ async function startServer() {
             }
         });
 
-        // 🌟 スキーマ詳細（Wixが最も頻繁に呼ぶ場所） 🌟
+        // 🌟 スキーマ詳細 🌟
         app.post('/schemas/find', async (req, res) => {
             try {
                 const reqIds = req.body.schemaIds || [];
-                const cleanIds = reqIds.map(cleanTableName);
                 const allRaw = await providers.schemaProvider.list();
                 
                 const schemas = reqIds.map(wixId => {
@@ -85,6 +88,7 @@ async function startServer() {
             res.status(200).json({ totalCount: countResult.totalCount || countResult || 0 });
         });
 
+        // 🌟 データ取得（_idマッピング修正）🌟
         app.post('/data/find', async (req, res) => {
             try {
                 const cleanName = cleanTableName(req.body.collectionName);
@@ -99,12 +103,17 @@ async function startServer() {
                 const rawItems = data && data.items ? data.items : (Array.isArray(data) ? data : []);
 
                 const items = rawItems.map(item => {
-                    // idを_idとして強制マッピング
                     const finalItem = { ...item };
-                    if (item.id) finalItem._id = String(item.id);
-                    else {
-                        const firstKey = Object.keys(item)[0];
-                        finalItem._id = String(item[firstKey]);
+                    
+                    // 修正: _id がすでに存在する場合は文字列化、なければ id を _id にマッピング
+                    if (item._id) {
+                        finalItem._id = String(item._id);
+                    } else if (item.id) {
+                        finalItem._id = String(item.id);
+                    } else {
+                        // テーブルに id も _id も無い場合、最初のカラムの値を仮の _id とする
+                        const firstKey = Object.keys(item).find(k => k !== '_id');
+                        finalItem._id = firstKey ? String(item[firstKey]) : Math.random().toString(36).substr(2, 9);
                     }
                     return finalItem;
                 });
@@ -116,7 +125,7 @@ async function startServer() {
         });
 
         const port = process.env.PORT || 10000;
-        app.listen(port, () => console.log(`🚀 スキーマ同期版起動中！`));
+        app.listen(port, () => console.log(`🚀 スキーマ同期版起動中！ ポート:${port}`));
 
     } catch (e) {
         console.error("‼️ 起動エラー:", e.message);
