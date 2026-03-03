@@ -47,9 +47,10 @@ async function startServer() {
             return {
                 id: wixId,
                 displayName: cleanTableName(wixId),
-                // "query" を追加して検索能力をアピール
+                // 操作権限をフルオープンに近い形で宣言
                 allowedOperations: ["get", "find", "count", "query"],
-                // 🚀 重要：Wixの最新仕様に基づき、動的ページに使える「能力」を明示
+                // 🚀 重要：ページングモードと読み取り専用フラグをより明示的に
+                pagingMode: "offset", 
                 capabilities: {
                     dataOperations: ["query", "get", "count"],
                     collectionOperations: ["readOnly"]
@@ -62,11 +63,12 @@ async function startServer() {
                     acc[fieldName] = {
                         displayName: fieldName,
                         type: f.type === 'number' ? 'number' : 'text',
-                        queryOperators: ["eq", "ne", "contains", "startsWith", "endsWith", "gt", "lt", "gte", "lte", "hasSome"]
+                        // 動的ページのURLフィルタに必要な演算子
+                        queryOperators: ["eq", "ne", "contains", "hasSome"]
                     };
                     return acc;
                 }, { 
-                    // _id を URL の部品として使えるように定義を強化
+                    // 🚀 _id フィールドの定義を最優先
                     "_id": { 
                         displayName: "_id", 
                         type: "text", 
