@@ -5,24 +5,24 @@ async function startServer() {
     const app = express();
     app.use(express.json());
 
-    console.log("--- 2026年 SPI対応アダプター 【動的ページ対応・最終版】 ---");
+    console.log("--- 2026年 SPI対応アダプター 【接続復旧＆デバッグ版】 ---");
 
     const SECRET_KEY = process.env.SECRET_KEY;
     if (!SECRET_KEY) {
-        console.error("‼️ 致命的エラー: SECRET_KEYが設定されていません。");
+        console.error("‼️ SECRET_KEY未設定");
         process.exit(1);
     }
 
-    // 認証関所
-    const authMiddleware = (req, res, next) => {
+    // 認証ミドルウェア
+    app.use((req, res, next) => {
         const providedKey = req.body?.requestContext?.settings?.secretKey;
         if (providedKey === SECRET_KEY) {
             next();
         } else {
+            console.warn(`⚠️ 認証失敗: ${req.path}`);
             res.status(401).json({ error: "Unauthorized" });
         }
-    };
-    app.use(authMiddleware);
+    });
 
     try {
         const dbUrlString = process.env.URL;
@@ -42,19 +42,13 @@ async function startServer() {
 
         const cleanTableName = (name) => typeof name === 'string' && name.includes('/') ? name.split('/').pop() : name;
 
-        // 🌟 ここが変更の肝：Wixに動的ページを認識させるスキーマ設定 🌟
+        // 🌟 スキーマ定義：Wixが拒絶しない最小かつ必要な構成 🌟
         const translateSchema = (wixId, pgSchema) => {
             return {
                 id: wixId,
                 displayName: cleanTableName(wixId),
-                // 操作権限をフルオープンに近い形で宣言
-                allowedOperations: ["get", "find", "count", "query"],
-                // 🚀 重要：ページングモードと読み取り専用フラグをより明示的に
-                pagingMode: "offset", 
-                capabilities: {
-                    dataOperations: ["query", "get", "count"],
-                    collectionOperations: ["readOnly"]
-                },
+                // 動的ページに必須な get と find を含める
+                allowedOperations: ["get", "find", "count", "update", "insert", "remove"],
                 maxPageSize: 50,
                 ttl: 3600,
                 fields: pgSchema.fields.reduce((acc, f) => {
@@ -63,17 +57,11 @@ async function startServer() {
                     acc[fieldName] = {
                         displayName: fieldName,
                         type: f.type === 'number' ? 'number' : 'text',
-                        // 動的ページのURLフィルタに必要な演算子
-                        queryOperators: ["eq", "ne", "contains", "hasSome"]
+                        queryOperators: ["eq", "ne", "contains", "startsWith", "endsWith", "gt", "lt", "gte", "lte", "hasSome"]
                     };
                     return acc;
                 }, { 
-                    // 🚀 _id フィールドの定義を最優先
-                    "_id": { 
-                        displayName: "_id", 
-                        type: "text", 
-                        queryOperators: ["eq", "ne", "hasSome", "contains"] 
-                    } 
+                    "_id": { displayName: "_id", type: "text", queryOperators: ["eq", "ne", "hasSome", "contains"] } 
                 })
             };
         };
@@ -81,15 +69,19 @@ async function startServer() {
         app.post('/provision', (req, res) => res.status(200).json({}));
 
         app.post('/schemas/list', async (req, res) => {
+            console.log("📝 Wixがテーブル一覧を確認中...");
             try {
                 const results = await providers.schemaProvider.list();
-                res.status(200).json({ schemas: results.map(s => translateSchema(s.id, s)) });
+                const schemas = results.map(s => translateSchema(s.id, s));
+                res.status(200).json({ schemas });
             } catch (e) {
+                console.error("Schema List Error:", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
         app.post('/schemas/find', async (req, res) => {
+            console.log("🔍 Wixが特定のテーブルを探しています:", req.body.schemaIds);
             try {
                 const reqIds = req.body.schemaIds || [];
                 const allRaw = await providers.schemaProvider.list();
@@ -110,8 +102,9 @@ async function startServer() {
         });
 
         app.post('/data/find', async (req, res) => {
+            const cleanName = cleanTableName(req.body.collectionName);
+            console.log(`📡 データ取得リクエスト: ${cleanName}`);
             try {
-                const cleanName = cleanTableName(req.body.collectionName);
                 let fetchProjection = req.body.projection;
                 if (!Array.isArray(fetchProjection) || fetchProjection.length === 0) {
                     const allSchemas = await providers.schemaProvider.list();
@@ -125,17 +118,19 @@ async function startServer() {
                 const rawItems = data?.items || (Array.isArray(data) ? data : []);
                 const items = rawItems.map(item => ({
                     ...item,
-                    _id: String(item._id || item.id || Math.random())
+                    _id: String(item._id || item.id)
                 }));
                 res.status(200).json({ items, totalCount: data.totalCount ?? items.length });
             } catch (e) {
+                console.error("Data Find Error:", e.message);
                 res.status(500).json({ error: e.message });
             }
         });
 
         const port = process.env.PORT || 10000;
-        app.listen(port, () => console.log(`🚀 アダプター起動中！ ポート:${port}`));
+        app.listen(port, () => console.log(`🚀 アダプター再起動完了！ ポート:${port}`));
     } catch (e) {
+        console.error("Fatal Error:", e.message);
         process.exit(1);
     }
 }
